@@ -874,7 +874,7 @@ def main():
         flags=flags,
         info=INFO)
     App.default.lookup_action("reopen-tab").set_enabled(False)
-    App.default.get_style_manager().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+    Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
     if GtkSource: App.default.set_accels_for_action("win.open-files", ["<primary>o"])
     Preferences()
     App.default.main(css=APP_CSS)
