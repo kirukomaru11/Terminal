@@ -1,7 +1,7 @@
 {
     "app-id" : "io.github.kirukomaru11.Terminal",
     "runtime" : "org.gnome.Platform",
-    "runtime-version" : "master",
+    "runtime-version" : "51",
     "sdk" : "org.gnome.Sdk",
     "command" : "terminal",
     "finish-args" : [ "--device=dri", "--talk-name=org.freedesktop.Flatpak", "--socket=wayland" ],
