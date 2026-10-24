@@ -5,7 +5,8 @@ except ModuleNotFoundError:
         from .Utils import *
     except ModuleNotFoundError:
         print("No Utils")
-        exit()
+        import sys
+        sys.exit()
 
 try:
     from gi.repository import Vte
