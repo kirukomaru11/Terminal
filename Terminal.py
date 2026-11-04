@@ -19,24 +19,18 @@ except:
     GtkSource = False
 
 class Window(Window):
-    __gtype_name__ = "Window"
-
     view = GObject.Property(type=Adw.TabView)
     toolbar = GObject.Property(type=Adw.ToolbarView)
-    find = GObject.Property(type=Gtk.Widget)
     context_tab = GObject.Property(type=Adw.TabPage)
 
     def __init__(self, _id=None, tabs=None):
         tabs = tabs or []
         super().__init__()
-        self.find = Find()
-        if not _id: App.default.data.set_default(table="Windows", conditions="ID = ?", conds=(self.get_id(),), names=("ID", ), values=(self.get_id(),))
-        elif self.get_id() != _id: App.default.data.update(table="Windows", column="ID", value=self.get_id(), conditions="ID = ?", conds=(_id,))
+        if not _id: Preferences.data.set_default(table="Windows", conditions="ID = ?", conds=(self.get_id(),), names=("ID", ), values=(self.get_id(),))
+        elif self.get_id() != _id: Preferences.data.update(table="Windows", column="ID", value=self.get_id(), conditions="ID = ?", conds=(_id,))
         self.view = Adw.TabView(focusable=True)
         for i in (Adw.TabViewShortcuts.CONTROL_HOME, Adw.TabViewShortcuts.CONTROL_END, Adw.TabViewShortcuts.CONTROL_SHIFT_HOME, Adw.TabViewShortcuts.CONTROL_SHIFT_END): self.view.remove_shortcuts(i)
-        overlay = Gtk.Overlay(child=self.view)
-        overlay.add_overlay(self.find)
-        self.toolbar = Adw.ToolbarView(content=overlay)
+        self.toolbar = Adw.ToolbarView(content=self.view)
         box = Gtk.Box(css_name="main-header")
         a = {"New Window": "new-window", "New File": "new-file", "Open Files": "win.open-files", "Preferences": "preferences"}
         if not GtkSource:
@@ -47,17 +41,17 @@ class Window(Window):
         tab_button = Adw.TabButton(view=self.view, valign=Gtk.Align.CENTER)
         tab_button.connect("clicked", self.__class__.tab_button_clicked)
         tab_button.get_first_child().add_css_class("flat")
-        new_tab.bind_property("visible", tab_button, "visible", INVERT_BIND)
-        for i in (new_tab, tab_button, Adw.TabBar(view=self.view, autohide=False), Button(t=Gtk.ToggleButton, tooltip_text="Search", icon_name="edit-find", bindings=[(None, "active", self.find, "reveal-child", SYNC_BIND)]), Button(t=Gtk.MenuButton, menu_model=m, icon_name="open-menu", tooltip_text="Menu")):
+        new_tab.bind_property("visible", tab_button, "visible", SYNC_BIND | INVERT_BIND)
+        for i in (new_tab, tab_button, Adw.TabBar(view=self.view, autohide=False), Button(t=Gtk.MenuButton, menu_model=m, icon_name="open-menu", tooltip_text="Menu")):
             if isinstance(i, Gtk.Button) or isinstance(i, Gtk.MenuButton):
                 i.add_css_class("flat")
                 i.set_valign(Gtk.Align.CENTER)
             box.append(i)
         self.toolbar.add_top_bar(box)
-        for i in ("Default Width", "Default Height"): App.default.data.persist_action(self, i, 1, "Windows", i, "ID = ?", (self.get_id(),)).bind_property("state", self, i.lower().replace(" ", "-"), SYNC_BIND, unpack_bind, variant_bind)
-        App.default.data.persist_action(self, "Maximized", False, "Windows", "Maximized", "ID = ?", (self.get_id(),)).bind_property("state", self, "maximized", SYNC_BIND, unpack_bind, variant_bind)
-        App.default.data.persist_action(self, "Fullscreen", False, "Windows", "Fullscreen", "ID = ?", (self.get_id(),)).connect("notify::state", self.change_fullscreen)
-        for i in App.default.data.read(table="Tabs", conditions="Window = ?", conds=(self.get_id(),), return_dict=True, force_tuple=True): Tab.create(command=i["Command"], title=i["Title"])
+        for i in ("Default Width", "Default Height"): Preferences.data.persist_action(self, i, 1, "Windows", i, "ID = ?", (self.get_id(),)).bind_property("state", self, i.lower().replace(" ", "-"), SYNC_BIND, unpack_bind, variant_bind)
+        Preferences.data.persist_action(self, "Maximized", False, "Windows", "Maximized", "ID = ?", (self.get_id(),)).bind_property("state", self, "maximized", SYNC_BIND, unpack_bind, variant_bind)
+        Preferences.data.persist_action(self, "Fullscreen", False, "Windows", "Fullscreen", "ID = ?", (self.get_id(),)).connect("notify::state", self.change_fullscreen)
+        for i in Preferences.data.read(table="Tabs", conditions="Window = ?", conds=(self.get_id(),), return_dict=True, force_tuple=True): Tab.create(command=i["Command"], title=i["Title"])
         for i in tabs: Tab.create(command=i)
         if not self.view.get_selected_page(): Tab.create()
         overview = Adw.TabOverview(child=self.toolbar, enable_new_tab=True, view=self.view)
@@ -69,24 +63,16 @@ class Window(Window):
         self.view.connect("create-window", self.__class__.create)
         self.view.connect("setup-menu", Tab.setup_menu)
         self.view.connect("close-page", Tab.operation)
-        b = Adw.Breakpoint.new(Adw.BreakpointCondition.new_length(Adw.BreakpointConditionLengthType.MAX_WIDTH, 700, Adw.LengthUnit.PX))
-        for i in ("apply", "unapply"): b.connect(i, self.update_css_size)
-        b.add_setter(tab_button, "visible", True)
-        b.add_setter(self.find, "valign", Gtk.Align.END)
-        self.add_breakpoint(b)
+        self.breakpoint = Adw.Breakpoint.new(Adw.BreakpointCondition.new_length(Adw.BreakpointConditionLengthType.MAX_WIDTH, 700, Adw.LengthUnit.PX))
+        for i in ("apply", "unapply"): self.breakpoint.connect(i, self.update_css_size)
+        self.breakpoint.add_setter(tab_button, "visible", True)
+        self.add_breakpoint(self.breakpoint)
         self.set_content(overview)
         ToolbarFullscreen(self.toolbar)
         self.change_fullscreen()
         self.present()
         self.add_actions(("tab-context-set-title", Tab.action))
-        if GtkSource:
-            self.add_actions(("open-files", self.__class__.open_files))
-        if GtkSource or Vte:
-            for n, v in [("Regex", True), ("Whole Words", False), ("Case Sensitive", True)]:
-                variant = get_variant(v)
-                a = Gio.SimpleAction.new_stateful(n.lower().replace(" ", "-"), None, variant)
-                a.connect("notify::state", Find.state_changed, self.find)
-                self.add_action(a)
+        if GtkSource: self.add_actions(("open-files", self.__class__.open_files))
 
     @staticmethod
     def open_files(a, p, self): Gtk.FileDialog(filters=FILE_FILTER).open_multiple(None, None, self.__class__.do_open_files, self)
@@ -98,73 +84,11 @@ class Window(Window):
         except: return
         for i in files: Tab.create(view=self.view, command=i.get_uri())
 
-    def on_scroll(e, x, y):
-        if Gdk.ModifierType.CONTROL_MASK in e.get_current_event_state():
-            t = Tab.current
-            if t and Vte and isinstance(t.get_child(), Terminal):
-                f = App.default.PREFERENCES.vte_font
-                f.set_size(f.get_size() + (-y * 2000))
-                App.default.PREFERENCES.vte_font = f
-                return True
-            if t and GtkSource and isinstance(t.get_child(), View):
-                f = App.default.PREFERENCES.source_font
-                f.set_size(f.get_size() + (-y * 2000))
-                App.default.PREFERENCES.source_font = f
-                return True
-
     @staticmethod
     def on_key_pressed(e, v, kc, s):
         self = e.get_widget()
         if v == Gdk.KEY_F11: self.lookup_action("fullscreen").activate()
         if Gdk.ModifierType.CONTROL_MASK in s and (v == Gdk.KEY_O or v == Gdk.KEY_o and Gdk.ModifierType.SHIFT_MASK in s): self.get_content().set_open(not self.get_content().get_open())
-        if not self.view.get_selected_page(): return
-        t = self.view.get_selected_page().get_child()
-        if Vte and isinstance(t.get_child(), Terminal) and t.command == App.default.PREFERENCES.new_tab_command or isinstance(t.get_child(), View):
-            if isinstance(t.get_child(), Terminal):
-                if Gdk.ModifierType.CONTROL_MASK in s and v == Gdk.KEY_F:
-                    self.find.set_reveal_child(not self.find.get_reveal_child())
-                    return True
-                if Gdk.ModifierType.CONTROL_MASK in s and v == Gdk.KEY_V:
-                    t.get_child().paste_clipboard()
-                    return True
-                if Gdk.ModifierType.CONTROL_MASK in s and v == Gdk.KEY_C:
-                    self.set_focus(self.view)
-                    t.get_child().copy_clipboard_format(Vte.Format.TEXT)
-                    GLib.timeout_add(200, self.set_focus, t.get_child())
-                    return True
-        if GtkSource and isinstance(t.get_child(), View):
-            view = t.get_child()
-            if Gdk.ModifierType.CONTROL_MASK in s and v == Gdk.KEY_n:
-                self.find.move(True)
-                return True
-            if Gdk.ModifierType.CONTROL_MASK in s and v == Gdk.KEY_p:
-                self.find.move()
-                return True
-            if Gdk.ModifierType.CONTROL_MASK in s and v == Gdk.KEY_f:
-                self.find.set_reveal_child(True)
-                if self.find.get_reveal_child():
-                    b = view.get_buffer().get_selection_bounds()
-                    if b:
-                        t = view.get_buffer().get_text(b[0], b[1], True)
-                        if self.lookup_action("regex").get_state().unpack():
-                            t = GLib.Regex.escape_string(t, -1)
-                        self.find.find.set_text(t)
-                    self.find.find.grab_focus()
-                else:
-                    self.find.stop()
-                    view.grab_focus()
-                return True
-            if Gdk.ModifierType.CONTROL_MASK in s and v == Gdk.KEY_h:
-                self.find.do_replace()
-                return True
-            if v == Gdk.KEY_Escape and self.find.get_mapped():
-                self.find.stop()
-                view.grab_focus()
-                return True
-            file = view.file
-            if Gdk.ModifierType.CONTROL_MASK in s and v in (Gdk.KEY_S, Gdk.KEY_s):
-                if v == Gdk.KEY_S or not file.get_location(): Gtk.FileDialog(initial_name="New File").save(None, None, view.__class__.do_save_dialog, view)
-                else: view.save()
 
     @staticmethod
     def tab_button_clicked(b):
@@ -192,36 +116,47 @@ class Window(Window):
     @staticmethod
     def on_map(w): Tab.changed(w.view)
 
-    @staticmethod
-    def clipboard_read_text(cl, r):
-        App.default.get_active_window().set_focus(App.default.get_active_window().view)
-        v = App.default.get_active_window().view.get_selected_page().get_child().get_child()
-        v.feed_child(cl.read_text_finish(r).encode("utf-8"))
-        GLib.timeout_add(200, App.default.get_active_window().set_focus, v)
-
 class Find(Gtk.Revealer):
-    __gtype_name__ = "Find"
     find = GObject.Property(type=Gtk.SearchEntry)
     replace = GObject.Property(type=Gtk.Entry)
-    changing = GObject.Property(type=bool, default=False)
-    def __init__(self):
+    def __init__(self, widget):
         box = Gtk.Box(css_name="search", orientation=Gtk.Orientation.VERTICAL)
         super().__init__(css_name="find", transition_duration=300, halign=Gtk.Align.CENTER, child=box, valign=Gtk.Align.START)
+        self.actions = Gio.SimpleActionGroup()
+        self.insert_action_group(self.__class__.__name__.lower(), self.actions)
+        for n, v in [("Regex", True), ("Whole Words", False), ("Case Sensitive", True), ("Replace All", False)]:
+            variant = get_variant(v)
+            a = Gio.SimpleAction.new_stateful(n.lower().replace(" ", "-"), None, variant)
+            if n != "Replace All": a.connect("notify::state", self.__class__.changed, self)
+            self.add_action(a)
         self.find = Gtk.SearchEntry(hexpand=True, placeholder_text="Find")
         self.find.connect("activate", self.__class__.find_activate)
         self.find.connect("search-changed", self.__class__.changed)
-        self.replace = Gtk.Entry(hexpand=True, primary_icon_tooltip_text="Replace", primary_icon_name="edit-find-replace-symbolic", placeholder_text="Replace")
-        self.__class__.icon_press(self.replace, 1)
-        self.replace.bind_property("secondary-icon-name", self.replace, "secondary-icon-tooltip-text", DEFAULT_BIND, self.__class__.icon_bind)
-        self.replace.connect("activate", self.__class__.replace_activate)
-        self.replace.connect("changed", self.__class__.replace_changed)
-        self.replace.connect("icon-press", self.__class__.icon_press)
         b1, b2 = [Gtk.Box(hexpand=True, css_classes=["linked"]) for _ in range(2)]
-        for i in (Button(icon_name="go-previous", tooltip_text="Previous", callback=self.__class__.go), self.find, Button(t=Gtk.MenuButton, icon_name="emblem-system", tooltip_text="Options", menu_model=Menu(dict((i, f"win.{i.lower().replace(' ', '-')}") for i in ("Regex", "Whole Words", "Case Sensitive")))), Button(icon_name="go-next", tooltip_text="Next", callback=self.__class__.go)): b1.append(i)
-        for i in (self.replace,): b2.append(i)
-        self.replace.bind_property("visible", b2, "visible", DEFAULT_BIND)
-        for i in (b1, b2): box.append(i)
+        box.append(b1)
+        for i in (Button(icon_name="go-previous", tooltip_text="Previous", callback=self.__class__.go), self.find, Button(t=Gtk.MenuButton, icon_name="emblem-system", tooltip_text="Options", menu_model=Menu(dict((i, f"find.{i.lower().replace(' ', '-')}") for i in ("Regex", "Whole Words", "Case Sensitive")))), Button(icon_name="go-next", tooltip_text="Next", callback=self.__class__.go)): b1.append(i)
+        if View and isinstance(widget, View):
+            self.replace = Gtk.Entry(hexpand=True, primary_icon_tooltip_text="Replace", primary_icon_name="edit-find-replace-symbolic", placeholder_text="Replace")
+            for i in (self.replace,): b2.append(i)
+            box.append(b2)
+            self.lookup_action("replace-all").bind_property("state", self.replace, "secondary-icon-name", DEFAULT_BIND, self.__class__.icon_bind)
+            self.replace.bind_property("secondary-icon-name", self.replace, "secondary-icon-tooltip-text", DEFAULT_BIND, self.__class__.icon_tooltip_bind)
+            self.replace.connect("activate", self.__class__.do_replace)
+            self.replace.connect("icon-press", self.__class__.icon_press)
+            self.replace.bind_property("visible", b2, "visible", DEFAULT_BIND)
         self.bind_property("valign", self, "transition-type", DEFAULT_BIND, self.__class__.find_reveal_bind)
+        self.connect("notify::root", self.__class__.root_changed)
+
+    def add_action(self, action): self.actions.add_action(action)
+
+    def lookup_action(self, name): return self.actions.lookup_action(name)
+
+    @property
+    def widget(self): return (self.get_ancestor(Terminal) if Terminal else False) or (self.get_ancestor(View) if View else False)
+
+    @staticmethod
+    def root_changed(self, *_):
+        if hasattr(self.get_root(), "breakpoint"): self.get_root().breakpoint.add_setter(self, "valign", Gtk.Align.END)
 
     def stop(self):
         self.find.set_text("")
@@ -233,37 +168,29 @@ class Find(Gtk.Revealer):
         if self: self.move(True)
 
     @staticmethod
-    def replace_activate(s):
-        self = s.get_ancestor(Find)
-        if self: self.do_replace()
+    def icon_bind(b, v): return "edit-select" + ("-all" if v.unpack() else "") + "-symbolic"
 
     @staticmethod
-    def icon_bind(b, v): return "All" if v and "-all" in v else "Selected"
+    def icon_tooltip_bind(b, v): return "All" if v and "-all" in v else "Selected"
 
     @staticmethod
     def icon_press(s, b):
         self = s.get_ancestor(Find)
         if self and b == 0: self.do_replace()
-        if b == 1:
-            v = s.get_property("secondary-icon-name")
-            v = "" if v and "-all" in v else "-all"
-            s.set_property("secondary-icon-name", "edit-select" + v + "-symbolic")
-
-    @staticmethod
-    def state_changed(a, s, self): self.__class__.changed(self.find)
+        if b == 1: self.lookup_action("replace-all").set_state(get_variant(not self.lookup_action("replace-all").get_state().unpack()))
 
     def do_replace(self):
-        if self.changing or not self.find.get_text(): return
-        window = self.get_root()
-        view = window.view.get_selected_page().get_child().get_child()
-        if view.context.get_regex_error(): return
-        if view.context.get_settings().get_property("regex-enabled"):
+        self = self if isinstance(self, Find) else self.get_ancestor(Find) if isinstance(self, Gtk.Widget) else None
+        if not self or not self.find.get_text() or not self.widget: return
+        widget = self.widget
+        if widget.context.get_regex_error(): return
+        if widget.context.get_settings().get_property("regex-enabled"):
             if not GLib.Regex.check_replacement(self.replace.get_text())[0]: return Toast("Invalid Replacement")
-        if window.lookup_action("replace-all").get_state().unpack(): view.context.replace_all(self.replace.get_text(), -1)
+        if self.lookup_action("replace-all").get_state().unpack(): widget.context.replace_all(self.replace.get_text(), -1)
         else:
-            r = view.get_buffer().get_selection_bounds()
-            if not r: return self.move(True, self.__class__.try_replace, (view, self.replace.get_text()))
-            view.context.replace(r[0], r[1], self.replace.get_text(), -1)
+            r = widget.get_buffer().get_selection_bounds()
+            if not r: return self.move(True, self.__class__.try_replace, (widget, self.replace.get_text()))
+            widget.context.replace(r[0], r[1], self.replace.get_text(), -1)
 
     @staticmethod
     def try_replace(a):
@@ -272,21 +199,20 @@ class Find(Gtk.Revealer):
         if r: view.context.replace(r[0], r[1], t, -1)
 
     def move(self, v=False, func=False, data=None):
-        if self.changing: return
-        window = self.get_root()
-        tab = window.view.get_selected_page().get_child()
-        if isinstance(tab.get_child(), Terminal) and tab.find:
-            if v: tab.get_child().search_find_next()
-            else: tab.get_child().search_find_previous()
-        if isinstance(tab.get_child(), View) and tab.find and not tab.get_child().context.get_regex_error():
-            i = tab.get_child().get_buffer().get_selection_bounds()
+        widget = self.widget
+        if not widget: return
+        if Terminal and isinstance(widget, Terminal):
+            if v: widget.vte.search_find_next()
+            else: widget.vte.search_find_previous()
+        if View and isinstance(widget, View) and not widget.context.get_regex_error():
+            i = widget.get_buffer().get_selection_bounds()
             if i and v:
                 i = i[-1]
             elif i:
                 i = i[0]
-            s = tab.get_child().get_buffer().get_start_iter()
+            s = widget.get_buffer().get_start_iter()
             i = i or s
-            (tab.get_child().context.forward_async if v else tab.get_child().context.backward_async)(i, None, self.__class__.move_finish, ("forward" if v else "backward", tab.get_child(), func, data))
+            (widget.context.forward_async if v else widget.context.backward_async)(i, None, self.__class__.move_finish, ("forward" if v else "backward", widget.source, func, data))
 
     @staticmethod
     def move_finish(a, b, data):
@@ -305,58 +231,47 @@ class Find(Gtk.Revealer):
     @staticmethod
     def go(b):
         self = b.get_ancestor(Find)
-        if not self or self.changing: return
+        if not self: return
         self.move(b.get_tooltip_text() == "Next")
 
-    @staticmethod
-    def replace_changed(s):
-        self = s.get_ancestor(Find)
-        if not self or self.changing: return
-        window = self.get_root()
-        tab = window.view.get_selected_page().get_child()
-        tab.replace = self.replace.get_text()
-
-    @staticmethod
-    def changed(s):
-        self = s.get_ancestor(Find)
-        if not self or self.changing: return
-        window = self.get_root()
-        if not window.view.get_selected_page(): return
-        tab = window.view.get_selected_page().get_child()
-        tab.find = self.find.get_text()
-        if Vte and isinstance(tab.get_child(), Terminal):
-            find = tab.find
-            if not window.lookup_action("regex").get_state().unpack():
+    def changed(self, b=None, c=None):
+        if isinstance(self, Gtk.Widget):
+            self = self.get_ancestor(Find)
+        if not isinstance(self, Find):
+            self = c
+        if not isinstance(self, Find) or not self.widget: return
+        find = self.find.get_text()
+        widget = self.widget
+        if Terminal and isinstance(widget, Terminal):
+            if not self.lookup_action("regex").get_state().unpack():
                 find = GLib.Regex.escape_string(find, -1)
             flags = VTE_PCRE2_MULTILINE
-            if not window.lookup_action("case-sensitive").get_state().unpack():
+            if not self.lookup_action("case-sensitive").get_state().unpack():
                 flags = flags | VTE_PCRE2_CASELESS
-            if window.lookup_action("whole-words").get_state().unpack():
+            if self.lookup_action("whole-words").get_state().unpack():
                 find = fr"\b{find}\b"
             if find:
                 r = None
             else:
                 r = Vte.Regex.new_for_search(find, -1, flags)
-            tab.get_child().search_set_regex(r, 0)
-            tab.get_child().search_set_wrap_around(True)
+            widget.vte.search_set_regex(r, 0)
+            widget.vte.search_set_wrap_around(True)
             self.move(True)
-        if GtkSource and isinstance(tab.get_child(), View):
-            tab.get_child().context.get_settings().set_property("regex-enabled", window.lookup_action("regex").get_state().unpack())
-            tab.get_child().context.get_settings().set_property("case-sensitive", window.lookup_action("case-sensitive").get_state().unpack())
-            tab.get_child().context.get_settings().set_property("at-word-boundaries", window.lookup_action("whole-words").get_state().unpack())
-            find = tab.find
-            if not tab.get_child().context.get_settings().get_property("regex-enabled"):
+        if View and isinstance(widget, View):
+            widget.context.get_settings().set_property("regex-enabled", self.lookup_action("regex").get_state().unpack())
+            widget.context.get_settings().set_property("case-sensitive", self.lookup_action("case-sensitive").get_state().unpack())
+            widget.context.get_settings().set_property("at-word-boundaries", self.lookup_action("whole-words").get_state().unpack())
+            if not widget.context.get_settings().get_property("regex-enabled"):
                 find = GtkSource.utils_unescape_search_text(find)
-            old = tab.get_child().context.get_settings().get_property("search-text")
-            tab.get_child().context.get_settings().set_property("search-text", find)
-            if tab.get_child().context.get_regex_error(): Toast("Invalid Search")
+            old = widget.context.get_settings().get_property("search-text")
+            widget.context.get_settings().set_property("search-text", find)
+            if widget.context.get_regex_error(): Toast("Invalid Search")
             elif old != find: self.move(True)
 
     @staticmethod
     def find_reveal_bind(b, v): return Gtk.RevealerTransitionType.SLIDE_DOWN if v == Gtk.Align.START else Gtk.RevealerTransitionType.SLIDE_UP
 
-class Tab(Gtk.ScrolledWindow):
-    __gtype_name__ = "Tab"
+class Tab(Adw.Bin):
     context_menu = Menu({"Set Title": "win.tab-context-set-title"})
 
     tab = GObject.Property(type=Adw.TabPage)
@@ -414,21 +329,10 @@ class Tab(Gtk.ScrolledWindow):
         if not view.get_selected_page(): return
         tab = view.get_selected_page().get_child()
         if not tab.tab: return
-        w.find.changing = True
-        w.find.find.set_text(tab.find)
-        w.find.replace.set_text(tab.replace)
-        w.find.changing = False
-        if tab.get_child():
-            if hasattr(tab.get_child(), "changed"): tab.get_child().changed()
-            w.find.replace.set_visible(GtkSource and isinstance(tab.get_child(), View))
-        else:
-            if GtkSource and (not tab.command or tab.command.startswith("file://")):
-                View(tab.command, tab)
-                w.find.replace.set_visible(True)
-            elif Vte:
-                tab.set_child(Terminal(tab.command))
-                w.find.replace.set_visible(False)
-        GLib.timeout_add(200, w.set_focus, tab.get_child())
+        if not tab.get_child():
+            if GtkSource and (not tab.command or tab.command.startswith("file://")): View(tab.command, tab)
+            elif Vte: tab.set_child(Terminal(tab.command))
+        tab.get_child().grab_focus()
 
     @staticmethod
     def idle_save_all(*_): Task.invoke(Tab.get_all, save=True)
@@ -448,8 +352,8 @@ class Tab(Gtk.ScrolledWindow):
                 if i.get_root() and i.get_root().get_mapped():
                     if not i.get_root().get_id() in window_seen:
                         window_seen.append(i.get_root().get_id())
-                        App.default.data.delete(table="Tabs", conditions="Window = ?", conds=(i.get_root().get_id(),))
-                    App.default.data.new(table="Tabs", values=(i.get_root().get_id(), i.n + 1, i.command, i.tab.get_title()))
+                        Preferences.data.delete(table="Tabs", conditions="Window = ?", conds=(i.get_root().get_id(),))
+                    Preferences.data.new(table="Tabs", values=(i.get_root().get_id(), i.n + 1, i.command, i.tab.get_title()))
         return tabs
 
     @staticmethod
@@ -464,7 +368,7 @@ class Tab(Gtk.ScrolledWindow):
             if view: view.close_page(t.tab) if isinstance(a, Gio.SimpleAction) else None
             Tab.closed.append(t.command)
             App.default.lookup_action("reopen-tab").set_enabled(bool(Tab.closed))
-            if hasattr(t, "pid") and t.pid > 10: GLib.spawn_command_line_async(f"kill -s 9 {t.pid}")
+            if getattr(t.get_child(), "pid", 0) > 10: GLib.spawn_command_line_async(f"kill -s 9 {t.get_child().pid}")
 
     @staticmethod
     def reopen(*_):
@@ -475,23 +379,21 @@ class Tab(Gtk.ScrolledWindow):
             App.default.lookup_action("reopen-tab").set_enabled(bool(Tab.closed))
 
 class Color(ListObject):
-    __gtype_name__ = "Color"
     rgba = GObject.Property(type=RGBA)
     title = GObject.Property(type=str)
 
     @staticmethod
     def changed(self, p=None):
         a = [i.rgba.to_string() for i in App.default.PREFERENCES.colors]
-        b = App.default.data.setting("Vte Palette", "#ffffff\n#1c1c1f\n#241f31\n#c01c28\n#2ec27e\n#f5c211\n#1e78e4\n#9841bb\n#0ab9dc\n#c0bfbc\n#5e5c64\n#ed333b\n#57e389\n#f8e45c\n#51a1ff\n#c061cb\n#4fd2fd\n#f6f5f4").split("\n")
+        b = Preferences.data.setting("Vte Palette", "#ffffff\n#1c1c1f\n#241f31\n#c01c28\n#2ec27e\n#f5c211\n#1e78e4\n#9841bb\n#0ab9dc\n#c0bfbc\n#5e5c64\n#ed333b\n#57e389\n#f8e45c\n#51a1ff\n#c061cb\n#4fd2fd\n#f6f5f4").split("\n")
         while len(a) > len(b): b.append("")
         for n, i in enumerate(a):
             b[n] = i
-        App.default.data.setting("Vte Palette", None, "\n".join(b))
+        Preferences.data.setting("Vte Palette", None, "\n".join(b))
         for i in Terminal.get_all():
             i.colors = App.default.PREFERENCES.colors
 
 class Preferences(Adw.PreferencesDialog):
-    __gtype_name__ = "Preferences"
     new_tab_command = GObject.Property(type=str)
     cursor_shape = GObject.Property(type=str)
     show_line_numbers = GObject.Property(type=bool, default=True)
@@ -525,24 +427,26 @@ class Preferences(Adw.PreferencesDialog):
 
     def __init__(self):
         super().__init__(content_width=600, content_height=600)
+        self.add_css_class("terminal-preferences")
+        self.__class__.data_init()
         App.default.PREFERENCES = self
         if GtkSource:
-            GtkSource.LanguageManager.get_default().prepend_search_path(App.default.data_folder.peek_path())
-            GtkSource.StyleSchemeManager.get_default().prepend_search_path(App.default.data_folder.peek_path())
+            GtkSource.LanguageManager.get_default().prepend_search_path(Preferences.data_folder.peek_path())
+            GtkSource.StyleSchemeManager.get_default().prepend_search_path(Preferences.data_folder.peek_path())
             GtkSource.StyleSchemeManager.get_default().force_rescan()
         general = Adw.PreferencesPage(title="General", icon_name="applications-development-symbolic")
         theme = Adw.PreferencesPage(title="Theme", icon_name="applications-graphics-symbolic")
         for i in (general, theme): self.add(i)
         if Vte:
             group = Adw.PreferencesGroup(title="Vte")
-            new_tab_command = Adw.EntryRow(title="New Tab Command", text=App.default.data.setting("New Tab Command", ""))
+            new_tab_command = Adw.EntryRow(title="New Tab Command", text=Preferences.data.setting("New Tab Command", ""))
             new_tab_command.bind_property("text", self, "new-tab-command", DEFAULT_BIND)
             new_tab_command.connect("changed", self.__class__.setting_changed)
             cursor_shape = Adw.ActionRow(title="Cursor Shape")
             g = Adw.ToggleGroup(name="Vte Cursor Shape", valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
             cursor_shape.add_suffix(g)
             for i in ["Block", "Vertical Bar", "Horizontal Bar"]: g.add(Adw.Toggle(label=i, name=i))
-            g.set_active_name(str(App.default.data.setting("Vte Cursor Shape", "Vertical Bar")))
+            g.set_active_name(str(Preferences.data.setting("Vte Cursor Shape", "Vertical Bar")))
             g.bind_property("active-name", self, "cursor-shape", SYNC_BIND)
             g.connect("notify::active", self.__class__.setting_changed)
             for i in (new_tab_command, cursor_shape): group.add(i)
@@ -552,7 +456,7 @@ class Preferences(Adw.PreferencesDialog):
             group = Adw.PreferencesGroup(title="Source")
             for i in ("Show Line Numbers", "Highlight Current Line"):
                 i = Adw.SwitchRow(title=i)
-                i.set_active(App.default.data.setting(i.get_title(), getattr(self, i.get_title().lower().replace(" ", "_"))))
+                i.set_active(Preferences.data.setting(i.get_title(), getattr(self, i.get_title().lower().replace(" ", "_"))))
                 self.bind_property(i.get_title().lower().replace(" ", "-"), i, "active", SYNC_BIND)
                 i.connect("notify::active", self.__class__.setting_changed)
                 group.add(i)
@@ -560,14 +464,14 @@ class Preferences(Adw.PreferencesDialog):
 
         if Vte:
             group = Adw.PreferencesGroup(title="Vte")
-            font = FontRow(title="Font", font_desc=Pango.FontDescription.from_string(App.default.data.setting("Vte Font", "Adwaita Mono 20")), name="Vte Font")
+            font = FontRow(title="Font", font_desc=Pango.FontDescription.from_string(Preferences.data.setting("Vte Font", "Adwaita Mono 20")), name="Vte Font")
             font.bind_property("font-desc", self, "vte-font", SYNC_BIND)
             font.connect("notify::font-desc", self.__class__.setting_changed)
             size = Adw.ExpanderRow(title="Palette Size")
             size.add_css_class("color")
             g = Adw.ToggleGroup(valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
             for i in ["0", "8", "16", "232", "256"]: g.add(Adw.Toggle(label=i, name=i))
-            g.set_active_name(str(App.default.data.setting("Vte Palette Size", "16")))
+            g.set_active_name(str(Preferences.data.setting("Vte Palette Size", "16")))
             size.add_suffix(g)
             colors = Gtk.GridView(max_columns=10, min_columns=10, factory=self.__class__.color_factory, model=Gtk.NoSelection(), valign=Gtk.Align.START)
             colors.set_css_classes([])
@@ -581,10 +485,10 @@ class Preferences(Adw.PreferencesDialog):
             group = Adw.PreferencesGroup(title="Source")
             b = GtkSource.StyleSchemeChooserButton(name="Source Style Scheme", valign=Gtk.Align.CENTER)
             b.bind_property("style-scheme", self, "style-scheme", SYNC_BIND)
-            v = App.default.data.setting("Source Style Scheme", "Adwaita-dark")
+            v = Preferences.data.setting("Source Style Scheme", "Adwaita-dark")
             if v in GtkSource.StyleSchemeManager.get_default().get_scheme_ids(): b.set_style_scheme(GtkSource.StyleSchemeManager.get_default().get_scheme(v))
             b.connect("notify::style-scheme", self.__class__.setting_changed)
-            font = FontRow(title="Font", font_desc=Pango.FontDescription.from_string(App.default.data.setting("Source Font", "Adwaita Mono 20")), name="Source Font")
+            font = FontRow(title="Font", font_desc=Pango.FontDescription.from_string(Preferences.data.setting("Source Font", "Adwaita Mono 20")), name="Source Font")
             font.bind_property("font-desc", self, "source-font", SYNC_BIND)
             font.connect("notify::font-desc", self.__class__.setting_changed)
             group.add(font)
@@ -597,170 +501,287 @@ class Preferences(Adw.PreferencesDialog):
             theme.add(group)
 
     @staticmethod
+    def data_uninit():
+        if hasattr(Preferences, "data"):
+            Preferences.data.close()
+            del Preferences.data
+
+    @staticmethod
+    def data_init():
+        if hasattr(Preferences, "data"):
+            try: Preferences.data.execute("SELECT 1")
+            except Exception as e:
+                Preferences.data_uninit()
+        if not hasattr(Preferences, "data"):
+            if App.default.get_application_id().endswith("Terminal"):
+                Preferences.data = App.default.data
+                Preferences.data_folder = App.default.data_folder
+            else:
+                flatpak_data = Path(Path(Path("/run/host/root" if FLATPAK_ID else "/", HOME), ".var", "app", INFO["ID"], "data"), "data")
+                Preferences.data = Data(flatpak_data if exists(flatpak_data) else Path(DATA, "Terminal", "data"), DATA_INIT, readonly=True)
+                Preferences.data_folder = Gio.File.new_for_path(Preferences.data.path).get_parent()
+
+    @staticmethod
     def palette_size_bind(b, v):
         l = List(Color)
-        default_colors = App.default.data.setting("Vte Palette", "#ffffff\n#1c1c1f\n#241f31\n#c01c28\n#2ec27e\n#f5c211\n#1e78e4\n#9841bb\n#0ab9dc\n#c0bfbc\n#5e5c64\n#ed333b\n#57e389\n#f8e45c\n#51a1ff\n#c061cb\n#4fd2fd\n#f6f5f4").split("\n")
+        default_colors = Preferences.data.setting("Vte Palette", "#ffffff\n#1c1c1f\n#241f31\n#c01c28\n#2ec27e\n#f5c211\n#1e78e4\n#9841bb\n#0ab9dc\n#c0bfbc\n#5e5c64\n#ed333b\n#57e389\n#f8e45c\n#51a1ff\n#c061cb\n#4fd2fd\n#f6f5f4").split("\n")
         l.append(Color(title="Foreground", rgba=RGBA(default_colors[0])))
         l.append(Color(title="Background", rgba=RGBA(default_colors[1])))
         default_colors = default_colors[2:]
         for n in range(int(v) if v.isdigit() else 0): l.append(Color(rgba=RGBA(default_colors[n] if len(default_colors) > n else ""), title=str(n + 1)))
-        App.default.data.setting("Vte Palette Size", None, v)
+        Preferences.data.setting("Vte Palette Size", None, v)
         return l
 
     @staticmethod
     def setting_changed(w, p=None):
-        if isinstance(w, Adw.ToggleGroup): App.default.data.setting(w.get_name(), None, w.get_active_name())
-        if isinstance(w, Adw.EntryRow): App.default.data.setting(w.get_title(), None, w.get_text())
+        if isinstance(w, Adw.ToggleGroup): Preferences.data.setting(w.get_name(), None, w.get_active_name())
+        if isinstance(w, Adw.EntryRow): Preferences.data.setting(w.get_title(), None, w.get_text())
         if isinstance(w, FontRow):
             font = w.get_font_desc()
-            App.default.data.setting(w.get_name(), None, font.to_string())
+            Preferences.data.setting(w.get_name(), None, font.to_string())
             if w.get_name() == "Source Font":
                 App.default.PREFERENCES.source_font_css = "textview { font-family: " + font.get_family() + "; font-size: " + str(int(font.get_size() / Pango.SCALE)) + "pt; }"
-        if isinstance(w, GtkSource.StyleSchemeChooserButton): App.default.data.setting(w.get_name(), None, w.get_style_scheme().get_id())
+        if isinstance(w, GtkSource.StyleSchemeChooserButton): Preferences.data.setting(w.get_name(), None, w.get_style_scheme().get_id())
 
     @staticmethod
     def show(*_):
-        if App.default.PREFERENCES.get_mapped(): Preferences.close()
+        if App.default.PREFERENCES.get_mapped(): App.default.PREFERENCES.close()
         App.default.PREFERENCES.present()
 
-if GtkSource:
-    class View(GtkSource.View):
-        __gtype_name__ = "View"
-        file = GObject.Property(type=GtkSource.File)
-        cancel = GObject.Property(type=Gio.Cancellable)
-        tab = GObject.Property(type=Tab)
-        context = GObject.Property(type=GtkSource.SearchContext)
-        def __init__(self, uri, tab, **kwargs):
-            super().__init__(right_margin=0, left_margin=0, wrap_mode=Gtk.WrapMode.WORD_CHAR, auto_indent=True, indent_width=4, insert_spaces_instead_of_tabs=True, tab_width=4, smart_backspace=True, smart_home_end=GtkSource.SmartHomeEndType.ALWAYS)
-            self.context = GtkSource.SearchContext.new(self.get_buffer())
-            self.context.get_settings().set_property("wrap-around", True)
-            self.tab = tab
-            self.get_buffer().set_max_undo_levels(0)
-            self.get_buffer().bind_property("loading", tab.tab, "loading", DEFAULT_BIND)
-            self.get_buffer().set_implicit_trailing_newline(False)
+class View(Gtk.Overlay):
+    find = GObject.Property(type=Find)
+    file = GObject.Property(type=GObject.Object)
+    source = GObject.Property(type=GObject.Object)
+    context = GObject.Property(type=GObject.Object)
+    cancel = GObject.Property(type=Gio.Cancellable)
+    tab = GObject.Property(type=Tab)
+    def __init__(self, uri, tab=None, **kwargs):
+        if not APP_CSS in App.default.css:
+            App.default.css += APP_CSS
+        super().__init__(css_name=self.__class__.__name__.lower())
+        self.source = GtkSource.View(right_margin=0, left_margin=0, wrap_mode=Gtk.WrapMode.WORD_CHAR, auto_indent=True, indent_width=4, insert_spaces_instead_of_tabs=True, tab_width=4, smart_backspace=True, smart_home_end=GtkSource.SmartHomeEndType.ALWAYS)
+        self.set_child(Gtk.ScrolledWindow(child=self.source))
+        self.source.set_css_classes([])
+        self.context = GtkSource.SearchContext.new(self.get_buffer())
+        self.context.get_settings().set_property("wrap-around", True)
+        self.tab = tab
+        self.get_buffer().set_max_undo_levels(0)
+        if self.tab: self.get_buffer().bind_property("loading", self.tab.tab, "loading", DEFAULT_BIND)
+        self.get_buffer().set_implicit_trailing_newline(False)
+        self.file = GtkSource.File.new()
+        self.file.set_location(Gio.File.new_for_uri(uri) if uri else None)
+        self.__class__.reload_file(self)
+        self.add_css_class("terminal")
+        self.source.connect("notify::show-line-numbers", self.__class__.change_margin)
+        if not hasattr(App.default, "PREFERENCES"): Preferences()
+        if hasattr(App.default, "PREFERENCES"):
             App.default.PREFERENCES.bind_property("style-scheme", self.get_buffer(), "style-scheme", DEFAULT_BIND)
-            self.file = GtkSource.File.new()
-            self.file.set_location(Gio.File.new_for_uri(uri) if uri else None)
-            self.__class__.reload_file(self)
-            self.set_css_classes([])
-            self.connect("notify::show-line-numbers", self.__class__.change_margin)
-            App.default.PREFERENCES.bind_property("show-line-numbers", self, "show-line-numbers", DEFAULT_BIND)
-            App.default.PREFERENCES.bind_property("highlight-current-line", self, "highlight-current-line", DEFAULT_BIND)
+            App.default.PREFERENCES.bind_property("show-line-numbers", self.source, "show-line-numbers", DEFAULT_BIND)
+            App.default.PREFERENCES.bind_property("highlight-current-line", self.source, "highlight-current-line", DEFAULT_BIND)
+        Window.controller_init(self)
+        self.connect("map", self.__class__.on_map)
+        self.find = Find(self)
+        self.add_overlay(self.find)
 
-        def changed(self):
-            self.file.check_file_on_disk()
-            if self.file.is_externally_modified():
-                d = Prompt(heading="Reload File?", body="File has changed on disk", callback=self.__class__.reload_file)
-                d.view = self
-                d.present(self.get_root())
+    def grab_focus(self): return self.source.grab_focus()
 
-        @staticmethod
-        def reload_file(d):
-            self = d if isinstance(d, View) else d.view
-            if not self.tab:
-                self.tab = self.get_ancestor(Tab)
-            if self.tab: self.tab.set_child(Adw.Spinner())
-            if hasattr(d, "view"):
-                del d.view
-            if self.file.get_location():
-                l = GtkSource.LanguageManager.get_default().guess_language(self.file.get_location().get_basename())
-                if l: self.get_buffer().set_language(l)
-                self.cancel = Gio.Cancellable.new()
-                GtkSource.FileLoader.new(self.get_buffer(), self.file).load_async(GLib.PRIORITY_DEFAULT, self.cancel, None, None, self.__class__.do_load_finish, self)
-            else: self.__class__.do_load_finish(self=self)
+    def get_buffer(self): return self.source.get_buffer()
 
-        @staticmethod
-        def do_load_finish(a=None, r=None, self=None):
-            if a and r:
-                a.load_finish(r)
-            if self.tab: self.tab.set_child(self)
-            self.tab = None
+    @staticmethod
+    def on_key_pressed(e, v, kc, s):
+        self = e.get_widget()
+        if Gdk.ModifierType.CONTROL_MASK in s and v in (Gdk.KEY_n, Gdk.KEY_N):
+            self.find.move(True)
+            return True
+        if Gdk.ModifierType.CONTROL_MASK in s and v in (Gdk.KEY_p, Gdk.KEY_P):
+            self.find.move()
+            return True
+        if Gdk.ModifierType.CONTROL_MASK in s and v in (Gdk.KEY_f, Gdk.KEY_F):
+            self.find.set_reveal_child(not (self.get_root() and self.get_root().get_focus() and self.get_root().get_focus().get_ancestor(Find)))
+            if self.find.get_reveal_child():
+                b = self.get_buffer().get_selection_bounds()
+                if b:
+                    t = self.get_buffer().get_text(b[0], b[1], True)
+                    if self.find.lookup_action("regex").get_state().unpack():
+                        t = GLib.Regex.escape_string(t, -1)
+                    self.find.find.set_text(t)
+                    self.find.find.select_region(0, -1)
+                self.find.find.grab_focus()
+            else:
+                self.find.stop()
+                self.source.grab_focus()
+            return True
+        if Gdk.ModifierType.CONTROL_MASK in s and v in (Gdk.KEY_h, Gdk.KEY_H):
+            self.find.do_replace()
+            return True
+        if v == Gdk.KEY_Escape and self.find.get_mapped():
+            self.find.stop()
+            self.source.grab_focus()
+            return True
+        file = self.file
+        if Gdk.ModifierType.CONTROL_MASK in s and v in (Gdk.KEY_s, Gdk.KEY_S):
+            if v == Gdk.KEY_S or not file.get_location(): Gtk.FileDialog(initial_name="New File").save(None, None, self.__class__.do_save_dialog, self)
+            else: self.save()
 
-        @staticmethod
-        def change_margin(self, p=None): self.set_left_margin(10 if self.get_property("show-line-numbers") else 0)
+    @staticmethod
+    def on_scroll(e, x, y):
+        if Gdk.ModifierType.CONTROL_MASK in e.get_current_event_state():
+            f = App.default.PREFERENCES.source_font
+            f.set_size(f.get_size() + (-y * 2000))
+            App.default.PREFERENCES.source_font = f
+            return True
 
-        def save(self): GtkSource.FileSaver.new(self.get_buffer(), self.file).save_async(GLib.PRIORITY_DEFAULT, self.cancel, None, None, self.__class__.do_save_finish, self)
+    def on_map(self, *_):
+        self.file.check_file_on_disk()
+        if self.file.is_externally_modified():
+            d = Prompt(heading="Reload File?", body="File has changed on disk", callback=self.__class__.reload_file)
+            d.view = self
+            d.present(self.get_root())
 
-        @staticmethod
-        def do_save_dialog(a, r, self):
-            try:
-                f = a.save_finish(r)
-            except: return
-            self.file.set_location(f)
-            tab = self.get_ancestor(Tab)
+    @staticmethod
+    def reload_file(d):
+        self = d if View and isinstance(d, View) else d.view
+        if not self.tab:
+            self.tab = self.get_ancestor(Tab)
+        if self.tab: self.tab.set_child(Adw.Spinner())
+        if hasattr(d, "view"):
+            del d.view
+        if self.file.get_location():
+            l = GtkSource.LanguageManager.get_default().guess_language(self.file.get_location().get_basename())
+            if l: self.get_buffer().set_language(l)
+            self.cancel = Gio.Cancellable.new()
+            GtkSource.FileLoader.new(self.get_buffer(), self.file).load_async(GLib.PRIORITY_DEFAULT, self.cancel, None, None, self.__class__.do_load_finish, self)
+        else: self.__class__.do_load_finish(self=self)
+
+    @staticmethod
+    def do_load_finish(a=None, r=None, self=None):
+        if a and r:
+            a.load_finish(r)
+        if self.tab: self.tab.set_child(self)
+        self.tab = None
+
+    @staticmethod
+    def change_margin(source, p=None): source.set_left_margin(10 if source.get_property("show-line-numbers") else 0)
+
+    def save(self): GtkSource.FileSaver.new(self.get_buffer(), self.file).save_async(GLib.PRIORITY_DEFAULT, self.cancel, None, None, self.__class__.do_save_finish, self)
+
+    @staticmethod
+    def do_save_dialog(a, r, self):
+        try:
+            f = a.save_finish(r)
+        except: return
+        self.file.set_location(f)
+        tab = self.get_ancestor(Tab)
+        if tab:
             tab.command = f.get_uri()
             tab.set_title(False)
-            self.save()
-            Tab.idle_save_all()
+        self.save()
+        if tab: Tab.idle_save_all()
 
-        @staticmethod
-        def do_save_finish(a, r, self):
-            l = self.file.get_location()
-            try:
-                result = a.save_finish(r)
-                Toast("Saved File" if result else "Couldn't Save File", timeout=1 if result else 0)
-            except Exception as e:
-                if "externally modified" in str(e):
-                    d = Prompt(heading="Overwrite File?", body="This file has been externally modified", callback=self.__class__.overwrite_file)
-                    d.view = self
-                    d.present(self.get_root())
-                else:
-                    Toast(f"{e} {l.get_uri()}", timeout=0)
+    @staticmethod
+    def do_save_finish(a, r, self):
+        l = self.file.get_location()
+        try:
+            result = a.save_finish(r)
+            Toast("Saved File" if result else "Couldn't Save File", timeout=1 if result else 0)
+        except Exception as e:
+            if "externally modified" in str(e):
+                d = Prompt(heading="Overwrite File?", body="This file has been externally modified", callback=self.__class__.overwrite_file)
+                d.view = self
+                d.present(self.get_root())
+            else: Toast(f"{e} {l.get_uri()}", timeout=0)
 
-        @staticmethod
-        def overwrite_file(d):
-            self = d.view
-            del d.view
-            l = self.file.get_location()
-            self.file = GtkSource.File.new()
-            self.file.set_location(l)
-            self.save()
-else:
+    @staticmethod
+    def overwrite_file(d):
+        self = d.view
+        del d.view
+        l = self.file.get_location()
+        self.file = GtkSource.File.new()
+        self.file.set_location(l)
+        self.save()
+
+if not GtkSource:
     View = False
 
-if Vte:
-    class Terminal(Vte.Terminal):
-        __gtype_name__ = "Terminal"
+class Terminal(Gtk.Overlay):
+    find = GObject.Property(type=Find)
+    vte = GObject.Property(type=GObject.Object)
 
-        @GObject.Property(type=List)
-        def colors(self): return getattr(self, "_colors", None)
+    @GObject.Property(type=List)
+    def colors(self): return getattr(self, "_colors", None)
 
-        @colors.setter
-        def colors(self, value):
-            setattr(self, "_colors", value)
-            l = [i.rgba.copy() if i.rgba else Gdk.RGBA() for i in self.colors]
-            self.set_colors(l[0], l[1], l[2:])
+    @colors.setter
+    def colors(self, value):
+        setattr(self, "_colors", value)
+        l = [i.rgba.copy() if i.rgba else Gdk.RGBA() for i in self.colors]
+        self.vte.set_colors(l[0], l[1], l[2:])
 
-        def __init__(self, command):
-            super().__init__(scrollback_lines=1024, allow_hyperlink=True, enable_sixel=True)
+    def __init__(self, command):
+        super().__init__(css_name=self.__class__.__name__.lower())
+        self.add_css_class("terminal")
+        self.vte = Vte.Terminal(scrollback_lines=1024, allow_hyperlink=True, enable_sixel=True)
+        self.set_child(Gtk.ScrolledWindow(child=self.vte))
+        Window.controller_init(self)
+        if not hasattr(App.default, "PREFERENCES"): Preferences()
+        if hasattr(App.default, "PREFERENCES"):
             self.colors = App.default.PREFERENCES.colors
-            App.default.PREFERENCES.bind_property("vte-font", self, "font-desc", SYNC_BIND)
-            App.default.PREFERENCES.bind_property("cursor-shape", self, "cursor-shape", SYNC_BIND, self.__class__.shape_bind)
-            self.connect("child-exited", self.__class__.child_exited)
-            self.spawn_async(Vte.PtyFlags.DEFAULT, None, GLib.shell_parse_argv(command)[-1], None, GLib.SpawnFlags.DEFAULT, None, None, GLib.MAXINT, None, self.__class__.finish_spawn, None)
+            App.default.PREFERENCES.bind_property("vte-font", self.vte, "font-desc", SYNC_BIND)
+            App.default.PREFERENCES.bind_property("cursor-shape", self.vte, "cursor-shape", SYNC_BIND, self.__class__.shape_bind)
+        self.vte.connect("child-exited", self.__class__.child_exited)
+        self.vte.spawn_async(Vte.PtyFlags.DEFAULT, None, GLib.shell_parse_argv(command)[-1], None, GLib.SpawnFlags.DEFAULT, None, None, GLib.MAXINT, None, self.__class__.finish_spawn, None)
+        self.find = Find(self)
+        self.add_overlay(self.find)
 
-        @staticmethod
-        def shape_bind(b, v): return Vte.CursorShape.IBEAM if v == "Vertical Bar" else Vte.CursorShape.UNDERLINE if v == "Horizontal Bar" else 0
+    def grab_focus(self): return self.vte.grab_focus()
 
-        @staticmethod
-        def finish_spawn(v, p, e=None, d=None):
-            self = v.get_parent()
-            self.pid = p
+    @staticmethod
+    def shape_bind(b, v): return Vte.CursorShape.IBEAM if v == "Vertical Bar" else Vte.CursorShape.UNDERLINE if v == "Horizontal Bar" else 0
 
-        @staticmethod
-        def child_exited(v, s):
-            self = v.get_parent()
-            if hasattr(self, "pid"):
-                del self.pid
-                Tab.operation(App.default.lookup_action("close-tab"), b=None, t=self)
+    @staticmethod
+    def finish_spawn(v, p, e=None, d=None):
+        self = v.get_ancestor(Terminal)
+        self.pid = p
 
-        @staticmethod
-        def get_all():
-            l = []
-            for i in Tab.get_all():
-                if isinstance(i.get_child(), Terminal): l.append(i.get_child())
-            return l
-else:
+    @staticmethod
+    def child_exited(v, s):
+        self = v.get_ancestor(Terminal)
+        if hasattr(self, "pid"):
+            del self.pid
+            if self.get_ancestor(Tab): Tab.operation(App.default.lookup_action("close-tab"), b=None, t=self.get_ancestor(Tab))
+
+    @staticmethod
+    def get_all():
+        l = []
+        for i in Tab.get_all():
+            if isinstance(i.get_child(), Terminal): l.append(i.get_child())
+        return l
+
+    @staticmethod
+    def on_scroll(e, x, y):
+        if Gdk.ModifierType.CONTROL_MASK in e.get_current_event_state():
+            f = App.default.PREFERENCES.vte_font
+            f.set_size(f.get_size() + (-y * 2000))
+            App.default.PREFERENCES.vte_font = f
+            return True
+
+    @staticmethod
+    def on_key_pressed(e, v, kc, s):
+        self = e.get_widget()
+        t = self.get_ancestor(Tab)
+        if t and t.command == App.default.PREFERENCES.new_tab_command:
+            if Gdk.ModifierType.CONTROL_MASK in s and v == Gdk.KEY_F:
+                self.find.set_reveal_child(not self.find.get_reveal_child())
+                return True
+            if Gdk.ModifierType.CONTROL_MASK in s and v == Gdk.KEY_V:
+                self.vte.paste_clipboard()
+                return True
+            if Gdk.ModifierType.CONTROL_MASK in s and v == Gdk.KEY_C:
+                self.get_root().set_focus(t)
+                self.vte.copy_clipboard_format(Vte.Format.TEXT)
+                GLib.timeout_add(200, self.get_root().set_focus, self.vte)
+                return True
+
+if not Vte:
     Terminal = False
 
 def handle_command(a, ar):
@@ -793,19 +814,28 @@ for i in "text/plain;text/x-chdr;text/x-csrc;text/x-c++hdr;text/x-c++src;text/x-
     if not i in INFO["MimeTypes"]: INFO["MimeTypes"].append(i)
 
 APP_CSS = """
-main-header { padding: 0px 5px; }
-main-header > menubutton { margin-left: 5px; }
-tabbar > revealer > box { padding: 0px; }
-widget > tab > textview,
-widget > tab > textview border,
-widget > tab > textview border gutter,
-widget > tab > textview text { background: none; }
-widget > tab > vte-terminal { padding: 6px; }
-.fullscreen find { margin-top: 6px; }
-find > search { border-spacing: 6px; }
-find > search > box { border-radius: 9px; backdrop-filter: blur(20px) brightness(0.9); background: color-mix(in srgb, var(--window-bg-color) 35%, transparent); }
-row.color gridview { border-spacing: 0px 12px; padding: 6px 0px; }
-row.color gridview child { padding: 0px; }
+view.terminal textview,
+view.terminal textview border,
+view.terminal textview border gutter,
+view.terminal textview text { background: none; }
+
+terminal.terminal vte-terminal { padding: 6px; }
+
+view.terminal find,
+terminal.terminal find { margin-left: 5px; margin-right: 5px; margin-bottom: 5px; }
+.fullscreen view.terminal find,
+.fullscreen terminal.terminal find { margin-top: 5px; }
+view.terminal find > search,
+terminal.terminal find > search { border-spacing: 5px; }
+view.terminal find > search > box,
+terminal.terminal find > search > box { border-radius: 9px; backdrop-filter: blur(20px) brightness(0.9); background: color-mix(in srgb, var(--window-bg-color) 35%, transparent); }
+
+.terminal-window main-header { padding: 0px 5px; }
+.terminal-window main-header > menubutton { margin-left: 5px; }
+.terminal-window tabbar > revealer > box { padding: 0px; }
+
+.terminal-preferences row.color gridview { border-spacing: 0px 12px; padding: 6px 0px; }
+.terminal-preferences row.color gridview child { padding: 0px; }
 """
 
 DATA_INIT = """
