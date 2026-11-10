@@ -656,7 +656,10 @@ class View(Gtk.Overlay):
     @staticmethod
     def do_load_finish(a=None, r=None, self=None):
         if a and r:
-            a.load_finish(r)
+            try: a.load_finish(r)
+            except Exception as e:
+                if "No such file" in str(e): Toast(f"{self.file.get_location()} doesn't exist")
+                else: Toast(e)
         if self.tab: self.tab.set_child(self)
         self.tab = None
 
