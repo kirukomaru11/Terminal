@@ -132,7 +132,7 @@ class Find(Gtk.Revealer):
         self.find = Gtk.SearchEntry(hexpand=True, placeholder_text="Find")
         self.find.connect("activate", self.__class__.find_activate)
         self.find.connect("search-changed", self.__class__.changed)
-        b1, b2 = [Gtk.Box(hexpand=True, css_classes=["linked"]) for _ in range(2)]
+        b1, b2 = [Gtk.Box(css_classes=["dark-blur-background", "linked"], hexpand=True) for _ in range(2)]
         box.append(b1)
         for i in (Button(icon_name="go-previous", tooltip_text="Previous", callback=self.__class__.go), self.find, Button(t=Gtk.MenuButton, icon_name="emblem-system", tooltip_text="Options", menu_model=Menu(dict((i, f"find.{i.lower().replace(' ', '-')}") for i in ("Regex", "Whole Words", "Case Sensitive")))), Button(icon_name="go-next", tooltip_text="Next", callback=self.__class__.go)): b1.append(i)
         if View and isinstance(widget, View):
@@ -831,7 +831,7 @@ terminal.terminal find { margin-left: 5px; margin-right: 5px; margin-bottom: 5px
 view.terminal find > search,
 terminal.terminal find > search { border-spacing: 5px; }
 view.terminal find > search > box,
-terminal.terminal find > search > box { border-radius: 9px; backdrop-filter: blur(20px) brightness(0.9); background: color-mix(in srgb, var(--window-bg-color) 35%, transparent); }
+terminal.terminal find > search > box { border-radius: 9px; }
 
 .terminal-window main-header { padding: 0px 5px; }
 .terminal-window main-header > menubutton { margin-left: 5px; }
