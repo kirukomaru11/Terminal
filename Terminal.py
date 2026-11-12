@@ -26,8 +26,8 @@ class Window(Window):
     def __init__(self, _id=None, tabs=None):
         tabs = tabs or []
         super().__init__()
-        if not _id: Preferences.data.set_default(table="Windows", conditions="ID = ?", conds=(self.get_id(),), names=("ID", ), values=(self.get_id(),))
-        elif self.get_id() != _id: Preferences.data.update(table="Windows", column="ID", value=self.get_id(), conditions="ID = ?", conds=(_id,))
+        if not _id: Settings.data.set_default(table="Windows", conditions="ID = ?", conds=(self.get_id(),), names=("ID", ), values=(self.get_id(),))
+        elif self.get_id() != _id: Settings.data.update(table="Windows", column="ID", value=self.get_id(), conditions="ID = ?", conds=(_id,))
         self.view = Adw.TabView(focusable=True)
         for i in (Adw.TabViewShortcuts.CONTROL_HOME, Adw.TabViewShortcuts.CONTROL_END, Adw.TabViewShortcuts.CONTROL_SHIFT_HOME, Adw.TabViewShortcuts.CONTROL_SHIFT_END): self.view.remove_shortcuts(i)
         self.toolbar = Adw.ToolbarView(content=self.view)
@@ -48,10 +48,10 @@ class Window(Window):
                 i.set_valign(Gtk.Align.CENTER)
             box.append(i)
         self.toolbar.add_top_bar(box)
-        for i in ("Default Width", "Default Height"): Preferences.data.persist_action(self, i, 1, "Windows", i, "ID = ?", (self.get_id(),)).bind_property("state", self, i.lower().replace(" ", "-"), SYNC_BIND, unpack_bind, variant_bind)
-        Preferences.data.persist_action(self, "Maximized", False, "Windows", "Maximized", "ID = ?", (self.get_id(),)).bind_property("state", self, "maximized", SYNC_BIND, unpack_bind, variant_bind)
-        Preferences.data.persist_action(self, "Fullscreen", False, "Windows", "Fullscreen", "ID = ?", (self.get_id(),)).connect("notify::state", self.change_fullscreen)
-        for i in Preferences.data.read(table="Tabs", conditions="Window = ?", conds=(self.get_id(),), return_dict=True, force_tuple=True): Tab.create(command=i["Command"], title=i["Title"])
+        for i in ("Default Width", "Default Height"): Settings.data.persist_action(self, i, 1, "Windows", i, "ID = ?", (self.get_id(),)).bind_property("state", self, i.lower().replace(" ", "-"), SYNC_BIND, unpack_bind, variant_bind)
+        Settings.data.persist_action(self, "Maximized", False, "Windows", "Maximized", "ID = ?", (self.get_id(),)).bind_property("state", self, "maximized", SYNC_BIND, unpack_bind, variant_bind)
+        Settings.data.persist_action(self, "Fullscreen", False, "Windows", "Fullscreen", "ID = ?", (self.get_id(),)).connect("notify::state", self.change_fullscreen)
+        for i in Settings.data.read(table="Tabs", conditions="Window = ?", conds=(self.get_id(),), return_dict=True, force_tuple=True): Tab.create(command=i["Command"], title=i["Title"])
         for i in tabs: Tab.create(command=i)
         if not self.view.get_selected_page(): Tab.create()
         overview = Adw.TabOverview(child=self.toolbar, enable_new_tab=True, view=self.view)
@@ -352,8 +352,8 @@ class Tab(Adw.Bin):
                 if i.get_root() and i.get_root().get_mapped():
                     if not i.get_root().get_id() in window_seen:
                         window_seen.append(i.get_root().get_id())
-                        Preferences.data.delete(table="Tabs", conditions="Window = ?", conds=(i.get_root().get_id(),))
-                    Preferences.data.new(table="Tabs", values=(i.get_root().get_id(), i.n + 1, i.command, i.tab.get_title()))
+                        Settings.data.delete(table="Tabs", conditions="Window = ?", conds=(i.get_root().get_id(),))
+                    Settings.data.new(table="Tabs", values=(i.get_root().get_id(), i.n + 1, i.command, i.tab.get_title()))
         return tabs
 
     @staticmethod
@@ -385,11 +385,11 @@ class Color(ListObject):
     @staticmethod
     def changed(self, p=None):
         a = [i.rgba.to_string() for i in App.default.PREFERENCES.colors]
-        b = Preferences.data.setting("Vte Palette", "#ffffff\n#1c1c1f\n#241f31\n#c01c28\n#2ec27e\n#f5c211\n#1e78e4\n#9841bb\n#0ab9dc\n#c0bfbc\n#5e5c64\n#ed333b\n#57e389\n#f8e45c\n#51a1ff\n#c061cb\n#4fd2fd\n#f6f5f4").split("\n")
+        b = (Settings["Vte Palette"] or "#ffffff\n#1c1c1f\n#241f31\n#c01c28\n#2ec27e\n#f5c211\n#1e78e4\n#9841bb\n#0ab9dc\n#c0bfbc\n#5e5c64\n#ed333b\n#57e389\n#f8e45c\n#51a1ff\n#c061cb\n#4fd2fd\n#f6f5f4").split("\n")
         while len(a) > len(b): b.append("")
         for n, i in enumerate(a):
             b[n] = i
-        Preferences.data.setting("Vte Palette", None, "\n".join(b))
+        Settings["Vte Palette"] = "\n".join(b)
         for i in Terminal.get_all():
             i.colors = App.default.PREFERENCES.colors
 
@@ -427,26 +427,26 @@ class Preferences(Adw.PreferencesDialog):
 
     def __init__(self):
         super().__init__(content_width=600, content_height=600)
+        Settings.get_data()
         self.add_css_class("terminal-preferences")
-        self.__class__.data_init()
         App.default.PREFERENCES = self
         if GtkSource:
-            GtkSource.LanguageManager.get_default().prepend_search_path(Preferences.data_folder.peek_path())
-            GtkSource.StyleSchemeManager.get_default().prepend_search_path(Preferences.data_folder.peek_path())
+            GtkSource.LanguageManager.get_default().prepend_search_path(Settings.data_folder.peek_path())
+            GtkSource.StyleSchemeManager.get_default().prepend_search_path(Settings.data_folder.peek_path())
             GtkSource.StyleSchemeManager.get_default().force_rescan()
         general = Adw.PreferencesPage(title="General", icon_name="applications-development-symbolic")
         theme = Adw.PreferencesPage(title="Theme", icon_name="applications-graphics-symbolic")
         for i in (general, theme): self.add(i)
         if Vte:
             group = Adw.PreferencesGroup(title="Vte")
-            new_tab_command = Adw.EntryRow(title="New Tab Command", text=Preferences.data.setting("New Tab Command", ""))
+            new_tab_command = Adw.EntryRow(title="New Tab Command", text=Settings["New Tab Command"] or "")
             new_tab_command.bind_property("text", self, "new-tab-command", DEFAULT_BIND)
             new_tab_command.connect("changed", self.__class__.setting_changed)
             cursor_shape = Adw.ActionRow(title="Cursor Shape")
             g = Adw.ToggleGroup(name="Vte Cursor Shape", valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
             cursor_shape.add_suffix(g)
             for i in ["Block", "Vertical Bar", "Horizontal Bar"]: g.add(Adw.Toggle(label=i, name=i))
-            g.set_active_name(str(Preferences.data.setting("Vte Cursor Shape", "Vertical Bar")))
+            g.set_active_name(Settings["Vte Cursor Shape"] or "Vertical Bar")
             g.bind_property("active-name", self, "cursor-shape", SYNC_BIND)
             g.connect("notify::active", self.__class__.setting_changed)
             for i in (new_tab_command, cursor_shape): group.add(i)
@@ -456,7 +456,8 @@ class Preferences(Adw.PreferencesDialog):
             group = Adw.PreferencesGroup(title="Source")
             for i in ("Show Line Numbers", "Highlight Current Line"):
                 i = Adw.SwitchRow(title=i)
-                i.set_active(Preferences.data.setting(i.get_title(), getattr(self, i.get_title().lower().replace(" ", "_"))))
+                v = Settings[i.get_title()]
+                if v != None: setattr(self, i.get_title().lower().replace(" ", "_"), v)
                 self.bind_property(i.get_title().lower().replace(" ", "-"), i, "active", SYNC_BIND)
                 i.connect("notify::active", self.__class__.setting_changed)
                 group.add(i)
@@ -464,14 +465,14 @@ class Preferences(Adw.PreferencesDialog):
 
         if Vte:
             group = Adw.PreferencesGroup(title="Vte")
-            font = FontRow(title="Font", font_desc=Pango.FontDescription.from_string(Preferences.data.setting("Vte Font", "Adwaita Mono 20")), name="Vte Font")
+            font = FontRow(title="Font", font_desc=Pango.FontDescription.from_string(Settings["Vte Font"] or "Adwaita Mono 20"), name="Vte Font")
             font.bind_property("font-desc", self, "vte-font", SYNC_BIND)
             font.connect("notify::font-desc", self.__class__.setting_changed)
             size = Adw.ExpanderRow(title="Palette Size")
             size.add_css_class("color")
             g = Adw.ToggleGroup(valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
             for i in ["0", "8", "16", "232", "256"]: g.add(Adw.Toggle(label=i, name=i))
-            g.set_active_name(str(Preferences.data.setting("Vte Palette Size", "16")))
+            g.set_active_name(str(Settings["Vte Palette Size"] or "16"))
             size.add_suffix(g)
             colors = Gtk.GridView(max_columns=10, min_columns=10, factory=self.__class__.color_factory, model=Gtk.NoSelection(), valign=Gtk.Align.START)
             colors.set_css_classes([])
@@ -485,10 +486,10 @@ class Preferences(Adw.PreferencesDialog):
             group = Adw.PreferencesGroup(title="Source")
             b = GtkSource.StyleSchemeChooserButton(name="Source Style Scheme", valign=Gtk.Align.CENTER)
             b.bind_property("style-scheme", self, "style-scheme", SYNC_BIND)
-            v = Preferences.data.setting("Source Style Scheme", "Adwaita-dark")
+            v = Settings["Source Style Scheme"] or "Adwaita-dark"
             if v in GtkSource.StyleSchemeManager.get_default().get_scheme_ids(): b.set_style_scheme(GtkSource.StyleSchemeManager.get_default().get_scheme(v))
             b.connect("notify::style-scheme", self.__class__.setting_changed)
-            font = FontRow(title="Font", font_desc=Pango.FontDescription.from_string(Preferences.data.setting("Source Font", "Adwaita Mono 20")), name="Source Font")
+            font = FontRow(title="Font", font_desc=Pango.FontDescription.from_string(Settings["Source Font"] or "Adwaita Mono 20"), name="Source Font")
             font.bind_property("font-desc", self, "source-font", SYNC_BIND)
             font.connect("notify::font-desc", self.__class__.setting_changed)
             group.add(font)
@@ -501,47 +502,29 @@ class Preferences(Adw.PreferencesDialog):
             theme.add(group)
 
     @staticmethod
-    def data_uninit():
-        if hasattr(Preferences, "data"):
-            Preferences.data.close()
-            del Preferences.data
-
-    @staticmethod
-    def data_init():
-        if hasattr(Preferences, "data"):
-            try: Preferences.data.execute("SELECT 1")
-            except Exception as e:
-                Preferences.data_uninit()
-        if not hasattr(Preferences, "data"):
-            if App.default.get_application_id().endswith("Terminal"):
-                Preferences.data = App.default.data
-                Preferences.data_folder = App.default.data_folder
-            else:
-                flatpak_data = Path(Path(Path("/run/host/root" if FLATPAK_ID else "/", HOME), ".var", "app", INFO["ID"], "data"), "data")
-                Preferences.data = Data(flatpak_data if exists(flatpak_data) else Path(DATA, "Terminal", "data"), DATA_INIT, readonly=True)
-                Preferences.data_folder = Gio.File.new_for_path(Preferences.data.path).get_parent()
-
-    @staticmethod
     def palette_size_bind(b, v):
         l = List(Color)
-        default_colors = Preferences.data.setting("Vte Palette", "#ffffff\n#1c1c1f\n#241f31\n#c01c28\n#2ec27e\n#f5c211\n#1e78e4\n#9841bb\n#0ab9dc\n#c0bfbc\n#5e5c64\n#ed333b\n#57e389\n#f8e45c\n#51a1ff\n#c061cb\n#4fd2fd\n#f6f5f4").split("\n")
+        default_colors = (Settings["Vte Palette"] or "#ffffff\n#1c1c1f\n#241f31\n#c01c28\n#2ec27e\n#f5c211\n#1e78e4\n#9841bb\n#0ab9dc\n#c0bfbc\n#5e5c64\n#ed333b\n#57e389\n#f8e45c\n#51a1ff\n#c061cb\n#4fd2fd\n#f6f5f4").split("\n")
         l.append(Color(title="Foreground", rgba=RGBA(default_colors[0])))
         l.append(Color(title="Background", rgba=RGBA(default_colors[1])))
         default_colors = default_colors[2:]
         for n in range(int(v) if v.isdigit() else 0): l.append(Color(rgba=RGBA(default_colors[n] if len(default_colors) > n else ""), title=str(n + 1)))
-        Preferences.data.setting("Vte Palette Size", None, v)
+        Settings["Vte Palette"] = v
         return l
 
     @staticmethod
     def setting_changed(w, p=None):
-        if isinstance(w, Adw.ToggleGroup): Preferences.data.setting(w.get_name(), None, w.get_active_name())
-        if isinstance(w, Adw.EntryRow): Preferences.data.setting(w.get_title(), None, w.get_text())
+        if isinstance(w, Adw.ToggleGroup):
+            Settings[w.get_name()] = w.get_active_name()
+        if isinstance(w, Adw.EntryRow):
+            Settings[w.get_title()] = w.get_text()
         if isinstance(w, FontRow):
             font = w.get_font_desc()
-            Preferences.data.setting(w.get_name(), None, font.to_string())
+            Settings[w.get_name()] = font.to_string()
             if w.get_name() == "Source Font":
                 App.default.PREFERENCES.source_font_css = "textview { font-family: " + font.get_family() + "; font-size: " + str(int(font.get_size() / Pango.SCALE)) + "pt; }"
-        if isinstance(w, GtkSource.StyleSchemeChooserButton): Preferences.data.setting(w.get_name(), None, w.get_style_scheme().get_id())
+        if isinstance(w, GtkSource.StyleSchemeChooserButton):
+            Settings[w.get_name()] = w.get_style_scheme().get_id()
 
     @staticmethod
     def show(*_):
@@ -841,11 +824,28 @@ terminal.terminal find > search > box { border-radius: 9px; }
 .terminal-preferences row.color gridview child { padding: 0px; }
 """
 
-DATA_INIT = """
+class Settings(metaclass=DictSettingMeta):
+    def get_data():
+        if hasattr(Settings, "data"):
+            try: Settings.data.execute("SELECT 1").close()
+            except Exception as e:
+                if hasattr(Settings, "data"):
+                    Settings.data.close()
+                    del Settings.data
+        if not hasattr(Settings, "data"):
+            if App.default.get_application_id().endswith("Terminal"):
+                Settings.data = App.default.data
+                Settings.data_folder = App.default.data_folder
+            else:
+                flatpak_data = Path(Path(Path("/run/host/root" if FLATPAK_ID else "/", HOME), ".var", "app", INFO["ID"], "data"), "data")
+                Settings.data = Data(flatpak_data if exists(flatpak_data) else Path(DATA, "Terminal", "data"), DATA_INIT, readonly=True)
+                Settings.data_folder = Gio.File.new_for_path(Settings.data.path).get_parent()
+        return Settings.data
+
+DATA_INIT = (Settings, """
 CREATE TABLE IF NOT EXISTS Tabs (Window INTEGER NOT NULL DEFAULT 1, ID INTEGER, Command TEXT DEFAULT '', Title TEXT DEFAULT '', UNIQUE ('Window', 'ID'), FOREIGN KEY (Window) REFERENCES Windows(ID) ON DELETE CASCADE ON UPDATE CASCADE);
 CREATE TABLE IF NOT EXISTS Windows (ID INTEGER PRIMARY KEY AUTOINCREMENT, 'Default Width' INTEGER NOT NULL DEFAULT 360, 'Default Height' INTEGER NOT NULL DEFAULT 760, 'Fullscreen' INTEGER NOT NULL DEFAULT 0, Maximized INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS Settings (Key TEXT PRIMARY KEY NOT NULL, Value TEXT);
-"""
+""")
 
 FILE_FILTER = Gio.ListStore.new(Gtk.FileFilter)
 FILE_FILTER.append(Gtk.FileFilter(name="Text", mime_types=["text/*"]))
