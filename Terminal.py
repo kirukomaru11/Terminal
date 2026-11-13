@@ -393,6 +393,17 @@ class Color(ListObject):
         for i in Terminal.get_all():
             i.colors = App.default.PREFERENCES.colors
 
+class ColorItem(ListItem):
+    def __init__(self):
+        p = {"valign": Gtk.Align.CENTER, "halign": Gtk.Align.CENTER, "overflow": Gtk.Overflow.HIDDEN}
+        super().__init__(child=Gtk.ColorDialogButton(dialog=Gtk.ColorDialog(), **p), **p)
+        self.get_child().get_first_child().set_properties(**p)
+        self.get_child().get_first_child().get_first_child().set_properties(**p)
+
+    def bind(self):
+        self.bindings.append(self.item.bind_property("rgba", self.get_child(), "rgba", SYNC_BIND))
+        self.bindings.append(self.item.bind_property("title", self.get_child(), "tooltip-text", DEFAULT_BIND))
+
 class Preferences(Adw.PreferencesDialog):
     new_tab_command = GObject.Property(type=str)
     cursor_shape = GObject.Property(type=str)
@@ -404,29 +415,10 @@ class Preferences(Adw.PreferencesDialog):
     source_font = GObject.Property(type=Pango.FontDescription)
     source_font_css =  GObject.Property(type=str)
 
-    color_factory = Gtk.SignalListItemFactory.new()
-    @staticmethod
-    def setup(f, l): l.set_child(Gtk.ColorDialogButton(dialog=Gtk.ColorDialog(), valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER))
-    color_factory.connect("setup", setup)
-    @staticmethod
-    def bind(f, l):
-        if not l.get_child(): return
-        l.get_child().bindings = []
-        Task.invoke(l.get_child().get_parent().set_properties, css_classes=[], focusable=False)
-        l.get_child().bindings.append(l.get_property("item").bind_property("rgba", l.get_child(), "rgba", SYNC_BIND))
-        l.get_child().bindings.append(l.get_property("item").bind_property("title", l.get_child(), "tooltip-text", DEFAULT_BIND))
-    color_factory.connect("bind", bind)
-    @staticmethod
-    def unbind(f, l):
-        for i in getattr(l.get_child(), "bindings", []): i.unbind()
-        if hasattr(l.get_child(), "bindings"): del l.get_child().bindings
-    color_factory.connect("unbind", unbind)
-    @staticmethod
-    def teardown(f, l): l.set_child(None)
-    color_factory.connect("teardown", teardown)
-
     def __init__(self):
         super().__init__(content_width=600, content_height=600)
+        if not APP_CSS in App.default.css:
+            App.default.css = App.default.css + APP_CSS
         Settings.get_data()
         self.add_css_class("terminal-preferences")
         App.default.PREFERENCES = self
@@ -469,14 +461,14 @@ class Preferences(Adw.PreferencesDialog):
             font.bind_property("font-desc", self, "vte-font", SYNC_BIND)
             font.connect("notify::font-desc", self.__class__.setting_changed)
             size = Adw.ExpanderRow(title="Palette Size")
-            size.add_css_class("color")
             g = Adw.ToggleGroup(valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
             for i in ["0", "8", "16", "232", "256"]: g.add(Adw.Toggle(label=i, name=i))
             g.set_active_name(str(Settings["Vte Palette Size"] or "16"))
             size.add_suffix(g)
-            colors = Gtk.GridView(max_columns=10, min_columns=10, factory=self.__class__.color_factory, model=Gtk.NoSelection(), valign=Gtk.Align.START)
+            colors = Gtk.GridView(max_columns=10, min_columns=10, factory=ColorItem.factory, model=Gtk.NoSelection(), valign=Gtk.Align.START)
             colors.set_css_classes([])
             size.add_row(colors)
+            colors.get_parent().add_css_class("color")
             self.bind_property("colors", colors.get_model(), "model", DEFAULT_BIND)
             g.bind_property("active-name", self, "colors", DEFAULT_BIND, self.__class__.palette_size_bind)
             for i in (font, size): group.add(i)
@@ -509,7 +501,6 @@ class Preferences(Adw.PreferencesDialog):
         l.append(Color(title="Background", rgba=RGBA(default_colors[1])))
         default_colors = default_colors[2:]
         for n in range(int(v) if v.isdigit() else 0): l.append(Color(rgba=RGBA(default_colors[n] if len(default_colors) > n else ""), title=str(n + 1)))
-        Settings["Vte Palette"] = v
         return l
 
     @staticmethod
@@ -539,8 +530,6 @@ class View(Gtk.Overlay):
     cancel = GObject.Property(type=Gio.Cancellable)
     tab = GObject.Property(type=Tab)
     def __init__(self, uri, tab=None, **kwargs):
-        if not APP_CSS in App.default.css:
-            App.default.css += APP_CSS
         super().__init__(css_name=self.__class__.__name__.lower())
         self.source = GtkSource.View(right_margin=0, left_margin=0, wrap_mode=Gtk.WrapMode.WORD_CHAR, auto_indent=True, indent_width=4, insert_spaces_instead_of_tabs=True, tab_width=4, smart_backspace=True, smart_home_end=GtkSource.SmartHomeEndType.ALWAYS)
         self.set_child(Gtk.ScrolledWindow(child=self.source))
@@ -699,8 +688,9 @@ class Terminal(Gtk.Overlay):
     @colors.setter
     def colors(self, value):
         setattr(self, "_colors", value)
-        l = [i.rgba.copy() if i.rgba else Gdk.RGBA() for i in self.colors]
-        self.vte.set_colors(l[0], l[1], l[2:])
+        if self.colors:
+            l = [i.rgba.copy() if i.rgba else Gdk.RGBA() for i in self.colors]
+            self.vte.set_colors(l[0], l[1], l[2:])
 
     def __init__(self, command):
         super().__init__(css_name=self.__class__.__name__.lower())
@@ -821,7 +811,8 @@ terminal.terminal find > search > box { border-radius: 9px; }
 .terminal-window tabbar > revealer > box { padding: 0px; }
 
 .terminal-preferences row.color gridview { border-spacing: 0px 12px; padding: 6px 0px; }
-.terminal-preferences row.color gridview child { padding: 0px; }
+.terminal-preferences row.color gridview child,
+.terminal-preferences row.color gridview child widget { padding: 0px; border-radius: 100%; }
 """
 
 class Settings(metaclass=DictSettingMeta):
@@ -911,6 +902,6 @@ def main():
     Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
     if GtkSource: App.default.set_accels_for_action("win.open-files", ["<primary>o"])
     Preferences()
-    App.default.main(css=APP_CSS)
+    App.default.main()
 
 if __name__ == "__main__": main()
