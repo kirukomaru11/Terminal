@@ -18,17 +18,17 @@ try:
 except:
     GtkSource = False
 
-class Window(Window):
-    view = GObject.Property(type=Adw.TabView)
+class Window(DataWindow):
+    view = GObject.Property(type=DataTabView)
     toolbar = GObject.Property(type=Adw.ToolbarView)
     context_tab = GObject.Property(type=Adw.TabPage)
+    fullscreen = GObject.Property(type=bool, default=False)
+    properties = ["fullscreen"]
 
-    def __init__(self, _id=None, tabs=None):
+    def __init__(self, data=None, tabs=None):
         tabs = tabs or []
-        super().__init__()
-        if not _id: Settings.data.set_default(table="Windows", conditions="ID = ?", conds=(self.get_id(),), names=("ID", ), values=(self.get_id(),))
-        elif self.get_id() != _id: Settings.data.update(table="Windows", column="ID", value=self.get_id(), conditions="ID = ?", conds=(_id,))
-        self.view = Adw.TabView(focusable=True)
+        super().__init__(data)
+        self.view = TabView(focusable=True)
         for i in (Adw.TabViewShortcuts.CONTROL_HOME, Adw.TabViewShortcuts.CONTROL_END, Adw.TabViewShortcuts.CONTROL_SHIFT_HOME, Adw.TabViewShortcuts.CONTROL_SHIFT_END): self.view.remove_shortcuts(i)
         self.toolbar = Adw.ToolbarView(content=self.view)
         box = Gtk.Box(css_name="main-header")
@@ -38,28 +38,19 @@ class Window(Window):
             del a["Open Files"]
         m = Menu({"!a": Menu(a), "!b": App.default.default_menu})
         new_tab = Button(css_classes=("flat",), callback=Tab.create, icon_name="tab-new", tooltip_text="New Tab", valign=Gtk.Align.CENTER)
-        tab_button = Adw.TabButton(view=self.view, valign=Gtk.Align.CENTER)
+        tab_button = Adw.TabButton(view=self.view.get_child(), valign=Gtk.Align.CENTER)
         tab_button.connect("clicked", self.__class__.tab_button_clicked)
         tab_button.get_first_child().add_css_class("flat")
         new_tab.bind_property("visible", tab_button, "visible", SYNC_BIND | INVERT_BIND)
-        for i in (new_tab, tab_button, Adw.TabBar(view=self.view, autohide=False), Button(t=Gtk.MenuButton, menu_model=m, icon_name="open-menu", tooltip_text="Menu")):
+        for i in (new_tab, tab_button, Adw.TabBar(view=self.view.get_child(), autohide=False), Button(t=Gtk.MenuButton, menu_model=m, icon_name="open-menu", tooltip_text="Menu")):
             if isinstance(i, Gtk.Button) or isinstance(i, Gtk.MenuButton):
                 i.add_css_class("flat")
                 i.set_valign(Gtk.Align.CENTER)
             box.append(i)
         self.toolbar.add_top_bar(box)
-        for i in ("Default Width", "Default Height"): Settings.data.persist_action(self, i, 1, "Windows", i, "ID = ?", (self.get_id(),)).bind_property("state", self, i.lower().replace(" ", "-"), SYNC_BIND, unpack_bind, variant_bind)
-        Settings.data.persist_action(self, "Maximized", False, "Windows", "Maximized", "ID = ?", (self.get_id(),)).bind_property("state", self, "maximized", SYNC_BIND, unpack_bind, variant_bind)
-        Settings.data.persist_action(self, "Fullscreen", False, "Windows", "Fullscreen", "ID = ?", (self.get_id(),)).connect("notify::state", self.change_fullscreen)
-        for i in Settings.data.read(table="Tabs", conditions="Window = ?", conds=(self.get_id(),), return_dict=True, force_tuple=True): Tab.create(command=i["Command"], title=i["Title"])
-        for i in tabs: Tab.create(command=i)
-        if not self.view.get_selected_page(): Tab.create()
-        overview = Adw.TabOverview(child=self.toolbar, enable_new_tab=True, view=self.view)
+        overview = Adw.TabOverview(child=self.toolbar, enable_new_tab=True, view=self.view.get_child())
         overview.connect("create-tab", Tab.overview_create)
         self.view.set_menu_model(Tab.context_menu)
-        self.view.connect("notify::selected-page", Tab.changed)
-        self.view.connect("notify::n-pages", Tab.idle_save_all)
-        self.view.connect("page-reordered", Tab.idle_save_all)
         self.view.connect("create-window", self.__class__.create)
         self.view.connect("setup-menu", Tab.setup_menu)
         self.view.connect("close-page", Tab.operation)
@@ -69,10 +60,17 @@ class Window(Window):
         self.add_breakpoint(self.breakpoint)
         self.set_content(overview)
         ToolbarFullscreen(self.toolbar)
+        for i in ("fullscreen",):
+            self.add_stateful_actions((i, get_variant(getattr(self, i.replace("-", "_")))))
+            self.bind_property(i, self.lookup_action(i), "state", SYNC_BIND, variant_bind, unpack_bind)
+        self.connect("notify::fullscreen", self.change_fullscreen)
         self.change_fullscreen()
-        self.present()
         self.add_actions(("tab-context-set-title", Tab.action))
         if GtkSource: self.add_actions(("open-files", self.__class__.open_files))
+        for i in self.view.restore(Tab): Tab.create(command=i["Command"], title=i["Title"])
+        for i in tabs: Tab.create(command=i)
+        if not self.view.get_selected_page(): Tab.create()
+        self.present()
 
     @staticmethod
     def open_files(a, p, self): Gtk.FileDialog(filters=FILE_FILTER).open_multiple(None, None, self.__class__.do_open_files, self)
@@ -114,7 +112,7 @@ class Window(Window):
         else: self.remove_css_class("small")
 
     @staticmethod
-    def on_map(w): Tab.changed(w.view)
+    def on_map(self): self.view.page_changed()
 
 class Find(Gtk.Revealer):
     find = GObject.Property(type=Gtk.SearchEntry)
@@ -271,35 +269,45 @@ class Find(Gtk.Revealer):
     @staticmethod
     def find_reveal_bind(b, v): return Gtk.RevealerTransitionType.SLIDE_DOWN if v == Gtk.Align.START else Gtk.RevealerTransitionType.SLIDE_UP
 
-class Tab(Adw.Bin):
+class TabView(DataTabView):
+    def page_changed(self):
+        if not self.get_mapped() or not self.current: return
+        tab = self.current
+        if not tab.get_child():
+            if GtkSource and (not tab.command or tab.command.startswith("file://")): View(tab.command, tab)
+            elif Vte: tab.set_child(Terminal(tab.command))
+        tab.get_child().grab_focus()
+
+class Tab(DataWindowTab):
     context_menu = Menu({"Set Title": "win.tab-context-set-title"})
 
-    tab = GObject.Property(type=Adw.TabPage)
-    command = GObject.Property(type=str)
+    command = GObject.Property(type=str, default="")
+    title = GObject.Property(type=str, default="")
     find = GObject.Property(type=str)
     replace = GObject.Property(type=str)
+    properties = ["command", "title"]
     closed = []
 
     @classproperty
-    def current(*_): return Window.current.view.get_selected_page().get_child() if Window.current and Window.current.view.get_selected_page() else None
+    def current(*_): return Window.current.view.current if Window.current else None
 
     def __init__(self, command=False, view=None, title=False):
-        super().__init__(css_name="tab")
         view = view or App.default.get_active_window().view
-        current_tab = view.get_selected_page().get_child() if view.get_selected_page() else False
-        self.tab = view.add_page(self, current_tab.tab if current_tab else None) if view.get_mapped() else view.append(self)
-        self.command = command if isinstance(command, str) else App.default.PREFERENCES.new_tab_command
-        self.set_title(title)
+        command = command if isinstance(command, str) else App.default.PREFERENCES.new_tab_command
+        super().__init__(view=view, command=command, title=title or "", css_name="tab")
+        self.bind_property("title", self.tab, "title", DEFAULT_BIND, self.__class__.title_bind)
 
-    def set_title(self, title):
-        if title: self.tab.set_title(title)
-        else: self.tab.set_title(basename(uri_decode(self.command)) if self.command.startswith("file://") else "Terminal" if self.command else "New File")
+    @staticmethod
+    def title_bind(b, v):
+        if v: return v
+        self = b.get_property("source")
+        return basename(uri_decode(self.command)) if self.command.startswith("file://") else "Terminal" if self.command else "New File"
 
     @staticmethod
     def overview_create(*_): return Tab.create().tab
 
     @staticmethod
-    def create(*_, view=False, command=False, title=False): return Tab(view=view if isinstance(view, Adw.TabView) else False, command=command, title=title)
+    def create(*_, view=False, command=False, title=False): return Tab(view=view, command=command, title=title)
 
     @staticmethod
     def new_file(*_): return Tab.create(command="")
@@ -312,59 +320,32 @@ class Tab(Adw.Bin):
         tab = window.context_tab if "context" in a.get_name() else window.view.get_selected_page()
         if "set-title" in a.get_name():
             d = EntryPrompt(callback=Tab.do_change_title, heading="Set Tab Title")
-            d.tab = tab
+            d.tab = tab.get_child()
             d.present()
 
     @staticmethod
     def do_change_title(d):
         tab = d.tab
         del d.tab
-        tab.set_title(d.get_extra_child().get_text())
-        Tab.idle_save_all()
+        tab.title = d.get_extra_child().get_text()
 
     @staticmethod
-    def changed(view, *_):
-        if not view.get_mapped(): return
-        w = view.get_root()
-        if not view.get_selected_page(): return
-        tab = view.get_selected_page().get_child()
-        if not tab.tab: return
-        if not tab.get_child():
-            if GtkSource and (not tab.command or tab.command.startswith("file://")): View(tab.command, tab)
-            elif Vte: tab.set_child(Terminal(tab.command))
-        tab.get_child().grab_focus()
-
-    @staticmethod
-    def idle_save_all(*_): Task.invoke(Tab.get_all, save=True)
-
-    @staticmethod
-    def get_all(save=False):
+    def get_all():
         tabs = []
         for w in App.default.get_windows():
-            if not isinstance(w, Window) or save and not w.get_mapped(): continue
-            for _id, i in enumerate(w.view.get_pages()):
-                if save:
-                    i.get_child().n = _id
-                tabs.append(i.get_child())
-        window_seen = []
-        if save and Window.current and Window.current.get_mapped():
-            for i in tabs:
-                if i.get_root() and i.get_root().get_mapped():
-                    if not i.get_root().get_id() in window_seen:
-                        window_seen.append(i.get_root().get_id())
-                        Settings.data.delete(table="Tabs", conditions="Window = ?", conds=(i.get_root().get_id(),))
-                    Settings.data.new(table="Tabs", values=(i.get_root().get_id(), i.n + 1, i.command, i.tab.get_title()))
+            if not isinstance(w, Window): continue
+            for i in w.view: tabs.append(i)
         return tabs
 
     @staticmethod
     def operation(a, b=False, t=False):
-        view = a if isinstance(a, Adw.TabView) else App.default.get_active_window().view
+        view = a.get_parent() if isinstance(a, Adw.TabView) else App.default.get_active_window().view
         if not t:
             t = b if isinstance(b, Adw.TabPage) else view.get_root().context_tab if "context" in a.get_name() else view.get_selected_page()
             t = t.get_child()
         if not t: return
-        view = t.get_ancestor(Adw.TabView)
-        if isinstance(a, Adw.TabView) or isinstance(a, Gio.SimpleAction) and "close-tab" in a.get_name():
+        view = t.get_ancestor(TabView)
+        if isinstance(a, TabView) or isinstance(a, Gio.SimpleAction) and "close-tab" in a.get_name():
             if view: view.close_page(t.tab) if isinstance(a, Gio.SimpleAction) else None
             Tab.closed.append(t.command)
             App.default.lookup_action("reopen-tab").set_enabled(bool(Tab.closed))
@@ -649,9 +630,8 @@ class View(Gtk.Overlay):
         tab = self.get_ancestor(Tab)
         if tab:
             tab.command = f.get_uri()
-            tab.set_title(False)
+            tab.title = ""
         self.save()
-        if tab: Tab.idle_save_all()
 
     @staticmethod
     def do_save_finish(a, r, self):
@@ -765,12 +745,7 @@ def handle_command(a, ar):
     if len(ar) >= 1:
         ar = ar[1:]
     if App.default.get_active_window(): App.default.get_active_window().present()
-    else:
-        d = a.data.read(table="Windows", column="ID", force_tuple=True)
-        if not d:
-            a.data.set_default(table="Windows", conditions="ID = '1'", values=(1,), names=("ID",))
-            d = [1]
-        for i in d: Window(i)
+    elif not Window.current: Window.restore(new=True)
     for i in ar: Tab.create(command=i)
     return 0
 
@@ -833,10 +808,7 @@ class Settings(metaclass=DictSettingMeta):
                 Settings.data_folder = Gio.File.new_for_path(Settings.data.path).get_parent()
         return Settings.data
 
-DATA_INIT = (Settings, """
-CREATE TABLE IF NOT EXISTS Tabs (Window INTEGER NOT NULL DEFAULT 1, ID INTEGER, Command TEXT DEFAULT '', Title TEXT DEFAULT '', UNIQUE ('Window', 'ID'), FOREIGN KEY (Window) REFERENCES Windows(ID) ON DELETE CASCADE ON UPDATE CASCADE);
-CREATE TABLE IF NOT EXISTS Windows (ID INTEGER PRIMARY KEY AUTOINCREMENT, 'Default Width' INTEGER NOT NULL DEFAULT 360, 'Default Height' INTEGER NOT NULL DEFAULT 760, 'Fullscreen' INTEGER NOT NULL DEFAULT 0, Maximized INTEGER NOT NULL DEFAULT 0);
-""")
+DATA_INIT = (Settings, Tab, Window)
 
 FILE_FILTER = Gio.ListStore.new(Gtk.FileFilter)
 FILE_FILTER.append(Gtk.FileFilter(name="Text", mime_types=["text/*"]))
