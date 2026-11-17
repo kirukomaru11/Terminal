@@ -293,6 +293,8 @@ class Tab(DataWindowTab):
 
     def __init__(self, command=False, view=None, title=False):
         view = view or App.default.get_active_window().view
+        if isinstance(command, list):
+            command = " ".join(command)
         command = command if isinstance(command, str) else App.default.PREFERENCES.new_tab_command
         super().__init__(view=view, command=command, title=title or "", css_name="tab")
         self.bind_property("title", self.tab, "title", DEFAULT_BIND, self.__class__.title_bind)
@@ -746,7 +748,7 @@ def handle_command(a, ar):
         ar = ar[1:]
     if App.default.get_active_window(): App.default.get_active_window().present()
     elif not Window.current: Window.restore(new=True)
-    for i in ar: Tab.create(command=i)
+    if ar: Tab.create(command=ar)
     return 0
 
 INFO = {
