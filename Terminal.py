@@ -730,13 +730,11 @@ class Terminal(Gtk.Overlay):
             if Gdk.ModifierType.CONTROL_MASK in s and v == Gdk.KEY_F:
                 self.find.set_reveal_child(not self.find.get_reveal_child())
                 return True
-            if Gdk.ModifierType.CONTROL_MASK in s and v == Gdk.KEY_V:
+            if Gdk.ModifierType.CONTROL_MASK in s and Gdk.ModifierType.SHIFT_MASK in s and v in (Gdk.KEY_V, Gdk.KEY_v):
                 self.vte.paste_clipboard()
                 return True
-            if Gdk.ModifierType.CONTROL_MASK in s and v == Gdk.KEY_C:
-                self.get_root().set_focus(t)
+            if Gdk.ModifierType.CONTROL_MASK in s and Gdk.ModifierType.SHIFT_MASK in s and v in (Gdk.KEY_C, Gdk.KEY_c):
                 self.vte.copy_clipboard_format(Vte.Format.TEXT)
-                GLib.timeout_add(200, self.get_root().set_focus, self.vte)
                 return True
 
 if not Vte:
